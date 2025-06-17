@@ -1,0 +1,170 @@
+#load libraries
+#open necessary packages
+library(ggsignif, help, pos = 2, lib.loc = NULL)
+library(ggplotify)
+library(patchwork)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(tidyverse)
+library(ggpubr)
+library(FSA)
+library(rstatix)
+library(ggsignif)
+library(knitr)
+library(dunn.test)
+library(skimr)
+library(caret)
+
+#2022/2023 A2C followup
+#load dataset
+df_A2C <- read.csv("/Users/dinukaariyaratne/Desktop/Data/NS1_ELISA_24.csv")
+#descriptive stats
+mean(df_A2C$Age)
+median(df_A2C$Age)
+
+#2022/2023 comparison of timepoints
+# Subset the dataframe for only relevant columns
+df_sub <- df_A2C %>% select(DEN1_1st:JEV_2nd)
+
+df_long <- df_sub %>%
+  pivot_longer(
+    everything(), 
+    names_to = c("Antigen", "Timepoint"), 
+    names_pattern = "(.+)_(\\d+st|\\d+nd)"
+  )
+set.seed(456)
+Antigen_levels <- c("DEN1", "DEN2", "DEN3", "DEN4", "JEV")
+Timepoint_levels <- c("1st", "2nd")
+
+
+#figure1
+df_long$Antigen <- factor(df_long$Antigen, levels = Antigen_levels)
+df_long$Timepoint <- factor(df_long$Timepoint, levels = Timepoint_levels)
+# --- End of Dummy df_long creation ---
+
+
+col_palette_alt <- c("1st"= "red", "2nd"="blue")
+
+# Calculate max value to set y-axis limits and p-value positioning
+max_val <- max(df_long$value, na.rm = TRUE)
+y_limit_upper <- max_val * 1 # Adjust multiplier for overall plot height
+
+
+p_alt1  <- ggboxplot(df_long,
+                   x = "Antigen", y = "value",
+                   color = "Timepoint", # <--- IMPORTANT: Map 'Timepoint' to 'color' for stat_compare_means
+                     # <--- NEW: Map 'Timepoint' to 'fill' for box interiors
+                                         # This resolves the 'fill' warning and colors interiors
+                 
+                   add = "jitter",
+                   palette = col_palette_alt, # This palette will apply to both color and fill because their levels match
+                   outlier.shape = NA,
+                   add.params = list(color = "Timepoint"), # Ensure jitter points are colored
+                   ylim = c(0, y_limit_upper)
+                   ) +
+   stat_compare_means(aes(group = Timepoint), # <-- IMPORTANT: Tells it to compare within Timepoint groups
+                      method = "wilcox.test",
+                      label = "p.signif",    # Display significance symbols
+                
+                      size = 4,              # Text size of significance labels
+                      # y.position is another argument for vertical placement of P-values.
+                      # It can be used to set a common upper level for all brackets.
+                      y.position = max_val * 1 # Place labels higher, adjust multiplier as needed
+                      ) +
+  labs(y = "Antibody Response", x = "Antigen") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(p_alt1)
+
+#figure2A
+# Plot data
+p_A2C_2nd <- ggboxplot(df_2nd,
+                   x = "Antigen", y = "Antibody_Response",
+                   color = "Immune_status",
+                   #fill = "Immune_status",
+                   palette = c("Monotypic"= "green", "Multitypic"="orange"),
+                   add = "jitter", # Adds individual data points
+                   ylim = c(0, 2.3) # Sets y-axis limits
+                   ) +
+  # Add stat_compare_means to perform Mann-Whitney U tests
+  #stat_compare_means(aes(group = Immune_status), # Group by Immune_status for comparisons within each Antigen
+                     #method = "wilcox.test", # Specify Mann-Whitney U test (Wilcoxon rank-sum test)
+                     #label = "p.format", # Format p-values (e.g., "p = 0.03")
+                     #label.y.npc = "top", # Place labels at the top of the plot region
+                     #vjust = 0.5 # Adjust vertical justification if needed
+                     #) +
+  #theme_bw() + # Applies a black and white theme
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Rotate x-axis labels for readability
+
+#print(p_A2C_2nd)
+
+stat_compare_means(aes(group = Immune_status), # <-- IMPORTANT: Tells it to compare within Timepoint groups
+                      method = "wilcox.test",
+                      label = "p.format",    # Display significance symbols
+                
+                      size = 3,              # Text size of significance labels
+                      # y.position is another argument for vertical placement of P-values.
+                      # It can be used to set a common upper level for all brackets.
+                      label.y = 2.3, # Place labels higher, adjust multiplier as needed
+                      ) +
+  labs(y = "Antibody Response", x = "Antigen") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(p_A2C_2nd)
+
+
+#figure2A
+
+# 1. Create a subset of data for primary DENV2 samples
+selected_samples <- c("989", "1608", "1612", "1615")
+
+df_subset <- df_2nd %>%
+  filter(X...Sample %in% selected_samples)
+
+# Make sure Antigen is a factor with the desired order in the subset
+df_subset$Antigen <- factor(df_subset$Antigen, levels = c("DEN1", "DEN2", "DEN3", "DEN4", "JEV"))
+
+# Define your custom colors for each Antigen (same as before)
+antigen_colors <- c(
+  "DEN1" = "red",
+  "DEN2" = "blue",
+  "DEN3" = "green",
+  "DEN4" = "purple",
+  "JEV" = "orange")
+# --- Perform Kruskal-Wallis Test ---
+# The formula is 'response_variable ~ grouping_variable'
+kruskal_result <- kruskal.test(Antibody_Response ~ Antigen, data = df_subset)
+
+# Format the p-value for display on the plot
+kruskal_p_label <- sprintf(" p = %.3f", kruskal_result$p.value)
+
+
+# 2. Draw  graph with Antigen on the X-axis
+p_subset_antigen <- ggboxplot(df_subset,
+                              x = "Antigen", # X-axis is now Antigen
+                              y = "Antibody_Response",
+                              color = "Antigen", # Color by Antigen
+                              palette = antigen_colors,
+                              add = "jitter",     # Adds individual data points
+                              ylim = c(0, 2)      # Sets y-axis limits
+                              ) +
+  # Add the Kruskal-Wallis p-value as an annotation
+  annotate("text",
+           x = 3, # X-position for the label (e.g., center of the plot)
+           y = 1.9, # Y-position for the label (slightly below ylim max)
+           label = kruskal_p_label,
+           size = 4, # Text size
+           color = "black"
+           ) +
+  labs(title = "",
+     ) +
+        
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Angle x-axis labels if they overlap
+
+print(p_subset_antigen)
